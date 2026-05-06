@@ -77,6 +77,23 @@ SpirvConstant *ConstEvaluator::translateAPValue(const APValue &value,
       }
       result = spvBuilder.getConstantComposite(targetType, elements);
     }
+  } else if (value.isArray() && targetType->isArrayType()) {
+    const auto *arrType = astContext.getAsArrayType(targetType);
+    const QualType elemType = arrType->getElementType();
+    const auto numElements = value.getArraySize();
+    llvm::SmallVector<SpirvConstant *, 16> elements;
+    elements.reserve(numElements);
+    for (uint32_t i = 0; i < numElements; ++i) {
+      const APValue &elt = i < value.getArrayInitializedElts()
+                               ? value.getArrayInitializedElt(i)
+                               : value.getArrayFiller();
+      auto *eltConst =
+          translateAPValue(elt, elemType, isSpecConstantMode);
+      if (!eltConst)
+        return nullptr;
+      elements.push_back(eltConst);
+    }
+    result = spvBuilder.getConstantComposite(targetType, elements);
   }
 
   if (result)

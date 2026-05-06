@@ -130,6 +130,14 @@ private:
                                   SpirvInstruction *instr);
   void doFunctionDecl(const FunctionDecl *decl);
   void doVarDecl(const VarDecl *decl);
+
+  /// Fold the given initializer Expr into a SpirvConstant suitable for use
+  /// as an OpVariable Initializer operand. Returns nullptr if the top-level
+  /// expression is not an InitListExpr or any leaf cannot be folded. Used in
+  /// library mode where there is no entry function body to inject deferred
+  /// OpStore initialization into.
+  SpirvConstant *foldInitializerToConstant(const Expr *expr, QualType type);
+  SpirvConstant *foldInitializerToConstantImpl(const Expr *expr, QualType type);
   void doRecordDecl(const RecordDecl *decl);
   void doClassTemplateDecl(const ClassTemplateDecl *classTemplateDecl);
   void doEnumDecl(const EnumDecl *decl);

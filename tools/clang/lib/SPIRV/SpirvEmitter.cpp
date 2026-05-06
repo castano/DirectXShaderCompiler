@@ -2020,6 +2020,61 @@ void SpirvEmitter::doEnumDecl(const EnumDecl *decl) {
     declIdMapper.createEnumConstant(*it);
 }
 
+// Recursive helper for foldInitializerToConstant. Handles any subexpression
+// (init list or leaf scalar/vector), producing a SpirvConstant if it folds.
+SpirvConstant *
+SpirvEmitter::foldInitializerToConstantImpl(const Expr *expr, QualType type) {
+  expr = expr->IgnoreParenImpCasts();
+
+  // Try direct const-eval for scalars/vectors and DeclRefExprs to constants.
+  if (auto *c = constEvaluator.tryToEvaluateAsConst(expr, isSpecConstantMode))
+    return c;
+
+  // Recurse into init lists for arrays/structs/vectors.
+  if (const auto *initList = dyn_cast<InitListExpr>(expr)) {
+    if (type->isArrayType()) {
+      const auto *arrType = astContext.getAsConstantArrayType(type);
+      if (!arrType)
+        return nullptr;
+      const QualType elemType = arrType->getElementType();
+      const uint64_t arrSize = arrType->getSize().getZExtValue();
+      const uint32_t numInits = initList->getNumInits();
+      llvm::SmallVector<SpirvConstant *, 16> elements;
+      elements.reserve(arrSize);
+      for (uint64_t i = 0; i < arrSize; ++i) {
+        SpirvConstant *eltConst = nullptr;
+        if (i < numInits) {
+          eltConst =
+              foldInitializerToConstantImpl(initList->getInit(i), elemType);
+        } else if (const auto *filler = initList->getArrayFiller()) {
+          eltConst = foldInitializerToConstantImpl(filler, elemType);
+        } else {
+          eltConst = spvBuilder.getConstantNull(elemType);
+        }
+        if (!eltConst)
+          return nullptr;
+        elements.push_back(eltConst);
+      }
+      return spvBuilder.getConstantComposite(type, elements);
+    }
+    // Other aggregate forms (structs, vectors with non-constant exprs, etc.)
+    // are not handled here — caller falls back to deferred OpStore init.
+  }
+
+  return nullptr;
+}
+
+// Top-level entry. Only fires for InitListExpr top-level initializers (e.g.
+// `static T arr[N] = {...}`). Scalar initializers like `static T x = a;` still
+// route through DXC's existing OpLoad+OpStore pattern at the entry function,
+// so we don't fold them here.
+SpirvConstant *
+SpirvEmitter::foldInitializerToConstant(const Expr *expr, QualType type) {
+  if (!isa<InitListExpr>(expr->IgnoreParenImpCasts()))
+    return nullptr;
+  return foldInitializerToConstantImpl(expr, type);
+}
+
 void SpirvEmitter::doVarDecl(const VarDecl *decl) {
   if (!validateVKAttributes(decl))
     return;
@@ -2204,11 +2259,25 @@ void SpirvEmitter::doVarDecl(const VarDecl *decl) {
     // We already know the variable is not externally visible here. If it does
     // not have local storage, it should be file scope variable.
     const bool isFileScopeVar = !decl->hasLocalStorage();
+    bool fileScopeVarInitOnVariable = false;
     if (isFileScopeVar) {
       if (decl->getType().isConstQualified() &&
           declIdMapper.tryToCreateConstantVar(decl))
         return;
-      var = declIdMapper.createFileVar(decl, llvm::None);
+
+      // In library mode there is no entry function body to inject deferred
+      // OpStore initialization into, so if the initializer is constant-
+      // evaluable, attach it directly to the OpVariable (allowed for the
+      // Private storage class in SPIR-V).
+      llvm::Optional<SpirvInstruction *> fileVarInit = llvm::None;
+      if (spvContext.isLib() && !decl->isStaticLocal() && decl->hasInit()) {
+        if (auto *constInit = foldInitializerToConstant(decl->getInit(),
+                                                        decl->getType())) {
+          fileVarInit = constInit;
+          fileScopeVarInitOnVariable = true;
+        }
+      }
+      var = declIdMapper.createFileVar(decl, fileVarInit);
     } else
       var = declIdMapper.createFnVar(decl, llvm::None);
 
@@ -2219,7 +2288,7 @@ void SpirvEmitter::doVarDecl(const VarDecl *decl) {
     if (isFileScopeVar) {
       if (decl->isStaticLocal()) {
         initOnce(decl->getType(), decl->getName(), var, decl->getInit());
-      } else {
+      } else if (!fileScopeVarInitOnVariable) {
         // Defer to initialize these global variables at the beginning of the
         // entry function.
         toInitGloalVars.push_back(decl);
