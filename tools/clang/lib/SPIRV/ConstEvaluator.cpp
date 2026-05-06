@@ -87,8 +87,7 @@ SpirvConstant *ConstEvaluator::translateAPValue(const APValue &value,
       const APValue &elt = i < value.getArrayInitializedElts()
                                ? value.getArrayInitializedElt(i)
                                : value.getArrayFiller();
-      auto *eltConst =
-          translateAPValue(elt, elemType, isSpecConstantMode);
+      auto *eltConst = translateAPValue(elt, elemType, isSpecConstantMode);
       if (!eltConst)
         return nullptr;
       elements.push_back(eltConst);

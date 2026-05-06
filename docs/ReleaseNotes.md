@@ -38,6 +38,11 @@ line upon naming the release. Refer to previous for appropriate section names.
 
 #### Bug Fixes
 
+- SPIR-V: file-scope `static const` aggregate variables (e.g. constant arrays)
+  in library targets (`-T lib_6_*`) are now initialized via the OpVariable's
+  Initializer operand. Previously their initialization was deferred to the
+  entry-function wrapper, so the values were silently dropped from library
+  modules that have no entry function body.
 - Fixed non-deterministic DXIL/PDB output when compiling shaders with resource
   arrays, debug info, and SM 6.6+.
   [#8171](https://github.com/microsoft/DirectXShaderCompiler/issues/8171)

@@ -2022,8 +2022,8 @@ void SpirvEmitter::doEnumDecl(const EnumDecl *decl) {
 
 // Recursive helper for foldInitializerToConstant. Handles any subexpression
 // (init list or leaf scalar/vector), producing a SpirvConstant if it folds.
-SpirvConstant *
-SpirvEmitter::foldInitializerToConstantImpl(const Expr *expr, QualType type) {
+SpirvConstant *SpirvEmitter::foldInitializerToConstantImpl(const Expr *expr,
+                                                           QualType type) {
   expr = expr->IgnoreParenImpCasts();
 
   // Try direct const-eval for scalars/vectors and DeclRefExprs to constants.
@@ -2068,8 +2068,8 @@ SpirvEmitter::foldInitializerToConstantImpl(const Expr *expr, QualType type) {
 // `static T arr[N] = {...}`). Scalar initializers like `static T x = a;` still
 // route through DXC's existing OpLoad+OpStore pattern at the entry function,
 // so we don't fold them here.
-SpirvConstant *
-SpirvEmitter::foldInitializerToConstant(const Expr *expr, QualType type) {
+SpirvConstant *SpirvEmitter::foldInitializerToConstant(const Expr *expr,
+                                                       QualType type) {
   if (!isa<InitListExpr>(expr->IgnoreParenImpCasts()))
     return nullptr;
   return foldInitializerToConstantImpl(expr, type);
@@ -2271,8 +2271,8 @@ void SpirvEmitter::doVarDecl(const VarDecl *decl) {
       // Private storage class in SPIR-V).
       llvm::Optional<SpirvInstruction *> fileVarInit = llvm::None;
       if (spvContext.isLib() && !decl->isStaticLocal() && decl->hasInit()) {
-        if (auto *constInit = foldInitializerToConstant(decl->getInit(),
-                                                        decl->getType())) {
+        if (auto *constInit =
+                foldInitializerToConstant(decl->getInit(), decl->getType())) {
           fileVarInit = constInit;
           fileScopeVarInitOnVariable = true;
         }
